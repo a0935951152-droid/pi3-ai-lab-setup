@@ -1,0 +1,83 @@
+networks:
+  ai-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SUBNET_CIDR}
+          gateway: ${GATEWAY_IP}
+
+services:
+  # --- 1. AI 模型核心 (Ollama) ---
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: always
+    expose:
+      - "11434"
+    networks:
+      ai-net:
+        ipv4_address: ${IP_OLLAMA}
+    volumes:
+      - ./models/llm:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_PARALLEL=1      # Pi 5 記憶體優化
+      - OLLAMA_MAX_LOADED_MODELS=1 # Pi 5 記憶體優化
+    tty: true
+
+  # --- 2. 網頁介面 (Open WebUI) ---
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: always
+    expose:
+      - "8080"
+    networks:
+      ai-net:
+        ipv4_address: ${IP_WEBUI}
+    environment:
+      - OLLAMA_BASE_URL=http://${IP_OLLAMA}:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - WEBUI_AUTH=True     # 強制開啟驗證
+      - ENABLE_SIGNUP=True  # 允許註冊
+    volumes:
+      - ./docker/open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # --- 3. 安全閘道 (Nginx) ---
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: always
+    ports:
+      - "80:80"
+    networks:
+      ai-net:
+        ipv4_address: ${IP_NGINX}
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./logs:/var/log/nginx
+    depends_on:
+      - open-webui
+
+  # --- 4. 外網隧道 (Ngrok) ---
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok_tunnel
+    restart: always
+    networks:
+      - ai-net
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command:
+      - "http"
+      - "--domain=${NGROK_DOMAIN}"
+      - "--log=stdout"
+      - "nginx:80"
+    depends_on:
+      - nginx

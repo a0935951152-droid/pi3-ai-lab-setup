@@ -1,0 +1,11 @@
+# 忽略日誌與模型檔
+logs/
+models/
+
+# 忽略工作區產生的暫存檔 (視你的需求決定是否取消註解)
+# workspace/
+
+# 忽略 Python 快取與環境
+__pycache__/
+*.pyc
+.env
